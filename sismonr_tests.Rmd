@@ -1,0 +1,163 @@
+---
+title: "Testing sismonr"
+author: "Olivia Angelin-Bonnet"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output: 
+  github_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(sismonr)
+library(tidyverse)
+```
+
+```{r ggplot-setup, cache = FALSE}
+theme_set(theme_bw())
+theme_update(plot.title = element_text(hjust = 0.5))
+theme_update(legend.position = "bottom")
+```
+
+## 2-genes activating system
+
+We'll start by simulating a simple system with 2 genes: a transcription regulator, and its target; the regulator activates the transcription of the target. For the simulation, we'll generate one individual which has no mutations on the genes. We'll run 10 simulations for this individual, with a simulation time of 10,000 seconds (to make sure that we observe the effect of the regulation).
+
+### Creating the system and individuals
+
+```{r two-genes-system}
+set.seed(364)
+
+## Creating system with one regulator gene
+my_system <- createInSilicoSystem(
+  empty = TRUE, 
+  G = 1,
+  PC.p = 1,
+  PC.TC.p = 1,
+  TC.pos.p = 1,
+  ploidy = 2
+) |> 
+  ## Adding the target gene
+  addGene(
+    coding = "PC",
+    TargetReaction = "MR"
+  ) |> 
+  ## Adding the regulation of gene 2 by gene 1
+  addEdge(
+    regID = 1,
+    tarID = 2,
+    regsign = "1"
+  )
+```
+
+```{r show-system}
+my_system$genes
+my_system$edg
+```
+
+```{r create-pop}
+my_pop <- createInSilicoPopulation(
+  1,
+  my_system,
+  ngenevariants = 1
+)
+```
+
+
+### Running a simulation
+
+```{r run-sim-null}
+set.seed(948)
+sim_null <- simulateInSilicoSystem(
+  my_system,
+  my_pop,
+  simtime = 10000,
+  ntrials = 10
+)
+```
+
+```{r show-sim-null}
+plotSimulation(sim_null$Simulation)
+```
+
+```{r save-sim-res}
+df_null <- sim_null$Simulation |> 
+  mergeAlleleAbundance() |> 
+  as_tibble() |> 
+  mutate(data_type = "original")
+```
+
+
+## Silencing target gene
+
+Now we'll modify the system by silencing the transcription of the target gene. We do this by setting its transcripton rate to a very small value. We didn't modify any property of the regulator or of the regulation.
+
+```{r system-silencing}
+my_system_silencing <- my_system
+my_pop_silencing <- my_pop
+
+my_system_silencing$genes[2, "TCrate"] <-  1e-20
+```
+
+
+```{r show-system-silencing}
+my_system_silencing$genes
+my_system_silencing$edg
+```
+
+
+```{r run-sim-silencing}
+set.seed(948)
+sim_silencing <- simulateInSilicoSystem(
+  my_system_silencing,
+  my_pop_silencing,
+  simtime = 10000,
+  ntrials = 10
+)
+```
+
+```{r show-sim-silencing}
+plotSimulation(sim_silencing$Simulation)
+```
+
+```{r save-sim-silencing}
+df_silencing <- sim_silencing$Simulation |> 
+  mergeAlleleAbundance() |> 
+  as_tibble() |> 
+  mutate(data_type = "silencing")
+```
+
+## Comparing original and silencing simulations
+
+The plot below compares the RNA and protein abundance of each gene between the two simulations. As expected, only the expression of the target gene is impacted by the silencing.
+
+```{r comparison-plot, fig.height = 8, fig.width = 10}
+bind_rows(
+  df_null,
+  df_silencing
+) |> 
+  pivot_longer(
+    cols = matches("(P|R)\\d"),
+    names_to = "molecule",
+    values_to = "abundance"
+  ) |> 
+  mutate(
+    molecule = str_replace(molecule, "^P", "Protein abundance for gene "),
+    molecule = str_replace(molecule, "^R", "RNA abundance for gene ")
+  ) |> 
+  ggplot(aes(x = time, y = abundance, colour = data_type)) +
+  geom_point(alpha = 0.5) +
+  facet_wrap(~ molecule, scale = "free_y") +
+  scale_colour_brewer(palette = "Set1") +
+  labs(
+    title = "Comparison of original and silencing simulations",
+    x = "Time",
+    y = "Abundance",
+    colour = "Simulation "
+  )
+```
+
+
+
+
